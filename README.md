@@ -25,19 +25,25 @@ The main strength of this project is that developers do not need to manage the m
 
 ## Quick Start
 
-1. Build the Docker image:
+1. Extract `gz_assets.zip` before building the Docker image:
+
+```bash
+unzip -o gz_assets.zip
+```
+
+2. Build the Docker image:
 
 ```bash
 ./scripts/build_docker.sh
 ```
 
-2. Run the simulator (default: `x500_mono_cam`, 1 vehicle, `testbed` world):
+3. Run the simulator (default: `x500_mono_cam`, 1 vehicle, `testbed` world):
 
 ```bash
 ./scripts/run_docker.sh
 ```
 
-3. Run with custom options:
+4. Run with custom options:
 
 ```bash
 ./scripts/run_docker.sh --model x500 --vehicles 2 --world testbed
