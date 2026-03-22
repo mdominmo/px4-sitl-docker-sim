@@ -1,6 +1,6 @@
 # PX4 SITL Docker Sim
-
-![Version](https://img.shields.io/github/v/release/mdominmo/px4-sitl-docker-sim?style=flat-square) ![License](https://img.shields.io/badge/license-Apache%202.0-3fb950?style=flat-square)
+![GitHub tag](https://img.shields.io/github/v/tag/mdominmo/px4-sitl-docker-sim)
+![GitHub](https://img.shields.io/github/license/mdominmo/px4-sitl-docker-sim)
 
 Built for fast robotics development, the simulator connects seamlessly through `px4_msgs` (uXRCE-DDS), MAVROS, and MAVSDK.
 
