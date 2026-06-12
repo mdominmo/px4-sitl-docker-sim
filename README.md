@@ -37,6 +37,12 @@ unzip -o gz_assets.zip
 ./scripts/build_docker.sh
 ```
 
+To build against a different PX4-Autopilot version (default: `v1.17.0`):
+
+```bash
+./scripts/build_docker.sh --px4-version v1.16.0
+```
+
 3. Run the simulator (default: `x500_mono_cam`, 1 vehicle, `testbed` world):
 
 ```bash

@@ -3,6 +3,7 @@ FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 ARG UID=1000
 ARG GID=1000
 ARG USERNAME=dev
+ARG PX4_VERSION=v1.17.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Europe/Madrid
@@ -69,7 +70,7 @@ RUN groupadd -g ${GID} ${USERNAME} \
 WORKDIR /workspace/px4_sitl_docker_sim
 
 RUN git clone \
-        --branch v1.15.4 \
+        --branch ${PX4_VERSION} \
         --depth 1 \
         --recurse-submodules \
         https://github.com/PX4/PX4-Autopilot.git
