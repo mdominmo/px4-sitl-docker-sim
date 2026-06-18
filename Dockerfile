@@ -1,21 +1,20 @@
-FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+# syntax=docker/dockerfile:1
 
-ARG UID=1000
-ARG GID=1000
-ARG USERNAME=dev
 ARG PX4_VERSION=v1.17.0
+ARG MICRO_XRCE_VERSION=v3.0.1
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Europe/Madrid
-ENV LANG=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=all
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage: base — CUDA runtime + system packages, timezone, locale
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04 AS base
 
-# ── Timezone ───────────────────────────────────────────────────────────────────
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Europe/Madrid \
+    LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8
+
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# ── Base system packages ───────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
         sudo curl git zip unzip wget \
         lsb-release software-properties-common gnupg ca-certificates \
@@ -28,10 +27,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Gazebo Harmonic (from osrfoundation) ──────────────────────────────────────
-# Installed before ROS2 and PX4 as the single Gazebo source.
-# The project uses SDF 1.10 + gz-transport13, both specific to Gazebo Harmonic.
-# ubuntu.sh will later run with --no-sim-tools so it does not touch Gazebo.
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage: gazebo-ros — Gazebo Harmonic + ROS 2 Humble
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM base AS gazebo-ros
+
 RUN wget https://packages.osrfoundation.org/gazebo.gpg \
        -O /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] \
@@ -43,7 +43,6 @@ RUN wget https://packages.osrfoundation.org/gazebo.gpg \
        python3-gz-transport13 \
     && rm -rf /var/lib/apt/lists/*
 
-# ── ROS2 Humble ────────────────────────────────────────────────────────────────
 RUN mkdir -p /etc/apt/keyrings \
     && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
        | gpg --dearmor -o /etc/apt/keyrings/ros-archive-keyring.gpg \
@@ -60,49 +59,92 @@ RUN mkdir -p /etc/apt/keyrings \
        ros-humble-ros-gzharmonic \
     && rm -rf /var/lib/apt/lists/*
 
-# ── User setup ─────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage: micro-xrce-source — download Micro-XRCE-DDS-Agent repo (cached)
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM base AS micro-xrce-source
+
+RUN git clone --depth 1 \
+        https://github.com/eProsima/Micro-XRCE-DDS-Agent.git \
+        /opt/Micro-XRCE-DDS-Agent
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage: micro-xrce-builder — checkout version + compile
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM micro-xrce-source AS micro-xrce-builder
+
+ARG MICRO_XRCE_VERSION
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN cd /opt/Micro-XRCE-DDS-Agent \
+    && git fetch --depth 1 origin ${MICRO_XRCE_VERSION} \
+    && git checkout FETCH_HEAD \
+    && mkdir build && cd build \
+    && cmake .. -DCMAKE_BUILD_TYPE=Release \
+    && make -j"$(nproc)" \
+    && make install \
+    && rm -rf /opt/Micro-XRCE-DDS-Agent
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage: px4-source — download PX4-Autopilot repo (cached)
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM gazebo-ros AS px4-source
+
+WORKDIR /workspace/px4_sitl_docker_sim
+
+RUN git clone --depth 1 https://github.com/PX4/PX4-Autopilot.git
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage: px4-toolchain — checkout PX4_VERSION + install PX4 build dependencies
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM px4-source AS px4-toolchain
+
+ARG PX4_VERSION
+
+RUN cd PX4-Autopilot \
+    && git fetch --depth 1 origin tag ${PX4_VERSION} \
+    && git checkout ${PX4_VERSION} \
+    && git submodule update --init --recursive --depth 1
+
+RUN PX4-Autopilot/Tools/setup/ubuntu.sh --no-nuttx --no-sim-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage: px4-builder — compile PX4 SITL firmware
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM px4-toolchain AS px4-builder
+
+RUN cd PX4-Autopilot && make px4_sitl -j"$(nproc)"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stage: runtime — final image
+# ═══════════════════════════════════════════════════════════════════════════════
+FROM px4-toolchain AS runtime
+
+ARG UID=1000
+ARG GID=1000
+ARG USERNAME=dev
+
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=all
+
+COPY --from=micro-xrce-builder /usr/local/ /usr/local/
+RUN ldconfig /usr/local/lib/
+
+COPY --from=px4-builder \
+     /workspace/px4_sitl_docker_sim/PX4-Autopilot/build/ \
+     /workspace/px4_sitl_docker_sim/PX4-Autopilot/build/
+
 RUN groupadd -g ${GID} ${USERNAME} \
     && useradd -m -u ${UID} -g ${GID} -s /bin/bash ${USERNAME} \
     && usermod -aG video ${USERNAME} \
     && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# ── PX4-Autopilot ──────────────────────────────────────────────────────────────
-WORKDIR /workspace/px4_sitl_docker_sim
-
-RUN git clone \
-        --branch ${PX4_VERSION} \
-        --depth 1 \
-        --recurse-submodules \
-        https://github.com/PX4/PX4-Autopilot.git
-
-# --no-nuttx     : skip embedded ARM toolchain, not needed for SITL
-# --no-sim-tools : skip Gazebo — already installed above as gz-harmonic
-RUN PX4-Autopilot/Tools/setup/ubuntu.sh --no-nuttx --no-sim-tools \
-    && rm -rf /var/lib/apt/lists/*
-
-# CMake will detect gz-transport13 (Harmonic) and build accordingly
-RUN cd PX4-Autopilot && make px4_sitl -j"$(nproc)"
-
-# ── Micro-XRCE-DDS-Agent ──────────────────────────────────────────────────────
-# Bridges PX4 uXRCE-DDS with ROS2. Binary installed to /usr/local/bin.
-RUN git clone \
-        --branch v3.0.1 \
-        --depth 1 \
-        https://github.com/eProsima/Micro-XRCE-DDS-Agent.git \
-        /tmp/Micro-XRCE-DDS-Agent \
-    && cd /tmp/Micro-XRCE-DDS-Agent \
-    && mkdir build && cd build \
-    && cmake .. -DCMAKE_BUILD_TYPE=Release \
-    && make -j"$(nproc)" \
-    && make install \
-    && ldconfig /usr/local/lib/ \
-    && rm -rf /tmp/Micro-XRCE-DDS-Agent
-
-# ── Copy project files ─────────────────────────────────────────────────────────
-# PX4-Autopilot, Micro-XRCE-DDS-Agent and gz_assets/ are excluded via .dockerignore
 COPY . /workspace/px4_sitl_docker_sim/
 
-# ── Permissions & ROS2 sourcing ────────────────────────────────────────────────
 RUN chown -R ${USERNAME}:${USERNAME} /workspace \
     && chmod +x scripts/launch_simulator.sh \
                scripts/entrypoint.sh \
@@ -113,6 +155,5 @@ WORKDIR /workspace/px4_sitl_docker_sim
 
 RUN echo 'source /opt/ros/humble/setup.bash' >> ~/.bashrc
 
-# Default: x500_mono_cam, 1 vehicle in testbed world. Override with: docker run ... px4_sitl_docker_sim --model x500|x500_mono_cam|rc_cessna --vehicles N --world WORLD
 CMD ["--model", "x500_mono_cam", "--vehicles", "1"]
 ENTRYPOINT ["/workspace/px4_sitl_docker_sim/scripts/entrypoint.sh"]

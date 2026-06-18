@@ -141,7 +141,8 @@ sleep 10
 
 y_0="0"
 for ((vehicle=1; vehicle<=NUM_VEHICLES; vehicle++)); do
-    export PX4_SIM_MODEL="$MODEL"
+    export PX4_GZ_MODEL="$MODEL"
+    export PX4_SIM_MODEL="gz_${MODEL}"
     export PX4_SYS_AUTOSTART=$SYS_AUTOSTART
 
     y_n=$((y_0 - (vehicle - 1) * 2))
