@@ -61,19 +61,31 @@ To build against a different PX4-Autopilot version (default: `v1.17.0`):
 - `--vehicles` or `-n`: number of vehicles to spawn
 - `--world` or `-w`: world name from `gz_assets/worlds` (with or without `.sdf`)
 - Default world: `testbed`
-- If the selected world does not exist in `gz_assets/worlds`, the launcher returns an error with available world names
+- If the selected world does not exist in `gz_assets/worlds` or any `--extra-assets` path, the launcher returns an error with available world names
+- `run_docker.sh --detach --name <container_name>`: run the container in the background under a fixed name instead of interactively, for callers that need to start/stop/inspect it programmatically (e.g. alongside a second, dependent container)
 
 ## Custom Models And Worlds
 
-You can add your own assets without changing the scripts:
-
-- Add new models in `gz_assets/models/<your_model_name>/...`
-- Add new worlds in `gz_assets/worlds/<your_world_name>.sdf`
-
-Then run the simulator using the new world:
+For your own local, one-off assets: add models in
+`gz_assets/models/<your_model_name>/...` and worlds in
+`gz_assets/worlds/<your_world_name>.sdf` (mounted as volumes by
+`run_docker.sh`, no rebuild needed), then run:
 
 ```bash
 ./scripts/run_docker.sh --world <your_world_name>
 ```
 
-`run_docker.sh` mounts `gz_assets/models` and `gz_assets/worlds` as volumes, so your local assets are used directly by Gazebo.
+For a tool/project built on top of this simulator: don't copy files into
+`gz_assets/` — pass your own asset directories in instead, so this repo's
+own `gz_assets/` stays generic:
+
+```bash
+./scripts/run_docker.sh --world <your_world_name> \
+    --extra-assets /path/to/your/models \
+    --extra-assets /path/to/your/generated/worlds
+```
+
+`--extra-assets <dir>` (repeatable) mounts `<dir>` read-only into the
+container and adds it to Gazebo's `GZ_SIM_RESOURCE_PATH`, so both models and
+world files inside it are found the same way as `gz_assets/models`/
+`gz_assets/worlds` - without ever touching this repo's own files.

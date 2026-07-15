@@ -23,8 +23,9 @@ handle_exit() {
 trap handle_exit EXIT
 
 usage() {
-    echo "Usage: $0 [--model MODEL] [--vehicles N] [--world WORLD]"
-    echo "Allowed models: x500, x500_mono_cam, rc_cessna"
+    echo "Usage: $0 [--model MODEL] [--vehicles N] [--world WORLD] [--autostart ID]"
+    echo "Built-in models (autostart resolved automatically): x500, x500_mono_cam, rc_cessna"
+    echo "Any other MODEL requires --autostart to provide the PX4 SYS_AUTOSTART id"
     echo "WORLD can be provided with or without the .sdf extension"
 }
 
@@ -37,6 +38,7 @@ run_cmd() {
 MODEL="x500_mono_cam"
 NUM_VEHICLES=1
 WORLD="testbed"
+AUTOSTART_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -65,6 +67,15 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             WORLD="$2"
+            shift 2
+            ;;
+        --autostart|-a)
+            if [[ -z "$2" || ! "$2" =~ ^[0-9]+$ ]]; then
+                echo "Invalid value for --autostart: '$2'. Use a positive integer."
+                usage
+                exit 1
+            fi
+            AUTOSTART_OVERRIDE="$2"
             shift 2
             ;;
         --help|-h)
@@ -100,23 +111,46 @@ case "$MODEL" in
         SYS_AUTOSTART=4003
         ;;
     *)
-        echo "Unknown model: $MODEL"
-        usage
-        exit 1
+        if [[ -z "$AUTOSTART_OVERRIDE" ]]; then
+            echo "Unknown model: $MODEL"
+            echo "Pass --autostart ID to run a custom model (its PX4 SYS_AUTOSTART id)."
+            usage
+            exit 1
+        fi
+        SYS_AUTOSTART="$AUTOSTART_OVERRIDE"
         ;;
 esac
 
 PX4_FOLDER="$(pwd)/../PX4-Autopilot"
 WORLD_FILE="$(pwd)/../gz_assets/worlds/${WORLD}.sdf"
 
+# EXTRA_ASSET_PATHS (colon-separated, set by run_docker.sh's --extra-assets)
+# lets a caller provide its own models/worlds without touching this repo's
+# own gz_assets/ - each entry is searched the same way gz_assets/worlds/ is.
+IFS=':' read -ra EXTRA_ASSET_DIRS <<< "${EXTRA_ASSET_PATHS:-}"
+
 if [[ ! -f "$WORLD_FILE" ]]; then
+    WORLD_FILE=""
+    for extra_dir in "${EXTRA_ASSET_DIRS[@]}"; do
+        [[ -z "$extra_dir" ]] && continue
+        if [[ -f "$extra_dir/${WORLD}.sdf" ]]; then
+            WORLD_FILE="$extra_dir/${WORLD}.sdf"
+            break
+        fi
+    done
+fi
+
+if [[ -z "$WORLD_FILE" ]]; then
     echo "World not found: $WORLD"
-    echo "Expected file: $WORLD_FILE"
     echo "Available worlds:"
     shopt -s nullglob
     world_files=("$(pwd)/../gz_assets/worlds/"*.sdf)
+    for extra_dir in "${EXTRA_ASSET_DIRS[@]}"; do
+        [[ -z "$extra_dir" ]] && continue
+        world_files+=("$extra_dir/"*.sdf)
+    done
     if (( ${#world_files[@]} == 0 )); then
-        echo "  (none found in gz_assets/worlds)"
+        echo "  (none found in gz_assets/worlds or --extra-assets paths)"
     else
         for file in "${world_files[@]}"; do
             echo "  - $(basename "$file" .sdf)"
@@ -132,7 +166,12 @@ echo "  Vehicles    : $NUM_VEHICLES"
 echo "  World       : $WORLD"
 
 export PX4_GZ_WORLD="$WORLD"
-export GZ_SIM_RESOURCE_PATH="$(pwd)/../gz_assets/models/:$(pwd)/../gz_assets/worlds/"
+RESOURCE_PATH="$(pwd)/../gz_assets/models/:$(pwd)/../gz_assets/worlds/"
+for extra_dir in "${EXTRA_ASSET_DIRS[@]}"; do
+    [[ -z "$extra_dir" ]] && continue
+    RESOURCE_PATH="${RESOURCE_PATH}:${extra_dir}"
+done
+export GZ_SIM_RESOURCE_PATH="${RESOURCE_PATH}${GZ_SIM_RESOURCE_PATH:+:$GZ_SIM_RESOURCE_PATH}"
 
 echo "starting gz server..."
 SIM_STARTED=true
