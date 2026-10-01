@@ -173,6 +173,8 @@ for extra_dir in "${EXTRA_ASSET_DIRS[@]}"; do
 done
 export GZ_SIM_RESOURCE_PATH="${RESOURCE_PATH}${GZ_SIM_RESOURCE_PATH:+:$GZ_SIM_RESOURCE_PATH}"
 
+export GZ_IP="${GZ_IP:-127.0.0.1}"
+
 echo "starting gz server..."
 SIM_STARTED=true
 run_cmd "gz sim -r ${PX4_GZ_WORLD}.sdf"
